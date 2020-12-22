@@ -51,91 +51,80 @@ def parse(lines):
 
     return raw_rules, messages
 
-def is_expanded(rule_set):
+
+def order(rule_set):
     """
-    >>> is_expanded([["a"]])
-    True
-    >>> is_expanded([["a", 1]])
-    False
-    >>> is_expanded([["abc"], ["a", 1]])
-    False
-    >>> is_expanded([["abc"], ["acd"]])
-    True
+    >>> order({3: [[4, 5], [2]], 5: ["b"], 1: [[2, 3]], 2: [[4, 4], [5, 5]], 4: ["a"], 0: [[4, 1, 5]]})
+    OrderedDict([(5, ['b']), (4, ['a']), (2, [[4, 4], [5, 5]]), (3, [[4, 5], [2]]), (1, [[2, 3]]), (0, [[4, 1, 5]])])
     """
+    ordered_rule_set = collections.OrderedDict()
+
+    ordered = set()
+    dependencies = {}
+    
+    for rule_id, rules in rule_set.items():
+        depends_on = set()
+        for rule in rules:
+            for token in rule:
+                if token in rule_set:
+                    depends_on.add(token)
+        dependencies[rule_id] = depends_on
+    
+    rules_to_check = collections.deque(dependencies.keys())
+    while rules_to_check:
+        rule_id = rules_to_check.popleft()
+        rule_dependencies = dependencies[rule_id]
+        if not rule_dependencies:
+            ordered.add(rule_id)
+            ordered_rule_set[rule_id] = rule_set[rule_id]
+            for rule_id, rule_dependencies in dependencies.items():
+                dependencies[rule_id] -= ordered
+        else:
+            rules_to_check.append(rule_id)
+
+    return ordered_rule_set
+
+
+def expand(rule_set, expanded_rules, messages):
+    """
+    >>> list(sorted(expand(["a", ["a", 1], [1, "a"]], {1: {"abb", "bbc"}}, {"aabbabbc", "abbabbca"})))
+    ['a', 'aabb', 'abba', 'abbc', 'bbca']
+    >>> list(sorted(expand(["a", ["a", 1], [1, "a"], [1, 1]], {1: {"abb", "bbc"}}, {"aabbabbcabbabbbbc", "bbcaaacc"})))
+    ['a', 'aabb', 'abba', 'abbabb', 'abbbbc', 'abbc', 'bbca', 'bbcabb']
+    >>> list(sorted(expand([[2, 3], [3, 2]], {2: {"aa", "bb"}, 3: {"ab", "ba"}}, {'ababbb', 'bababa', 'abbbab', 'aaabbb', 'aaaabbb'})))
+    ['aaab', 'abbb', 'babb', 'bbab', 'bbba']
+    """
+
+    expanded_rule_set = set()
     for rule in rule_set:
-        if all(isinstance(token, str) for token in rule):
+        if isinstance(rule, str):
+            expanded_rule_set.add(rule)
             continue
-        return False
-    return True
 
-def normalize(rule_set):
-    """
-    >>> normalize([[]])
-    deque([deque([])])
-    >>> normalize([[1, 2, "a", "b", 3, "a", "b", "c"]])
-    deque([deque([1, 2, 'ab', 3, 'abc'])])
-    >>> normalize([[1, 2, "a", "b", 3, "a", "b", "c"], ["a", "b", 3, "a", "b", "c"]])
-    deque([deque([1, 2, 'ab', 3, 'abc']), deque(['ab', 3, 'abc'])])
-    """
-    new_rule_set = collections.deque()
-    for rule in rule_set:
-        new_rule = collections.deque()
-        new_token = ""
+        new_rule = [""]
         for token in rule:
-            if isinstance(token, str):
-                new_token += token
-                continue
-            if new_token:
-                new_rule.append(new_token)
-                new_token = ""
-            new_rule.append(token)
-        if new_token:
-            new_rule.append(new_token)
-        new_rule_set.append(new_rule)
+            nested_rule = expanded_rules.get(token, [token])
+            new_rule_length = len(new_rule)
+            nested_rule_length = len(nested_rule)
 
-    return new_rule_set
+            if nested_rule_length > 1:
+                new_rule *= nested_rule_length
 
-def expand_rule(rule_set, replace_id, replace_rule_set):
-    """
-    >>> expand_rule([[1, 2, "a"], [2, 2, "b"]], 2, [[3, 4, "c"]])
-    deque([deque([1, 3, 4, 'ca']), deque([3, 4, 'c', 3, 4, 'cb'])])
-    >>> expand_rule([[2, "a", 2], [2, "b", 2]], 2, [[1, "c"], [3, "d"]])
-    deque([deque([1, 'ca', 1, 'c']), deque([3, 'da', 1, 'c']), deque([1, 'ca', 3, 'd']), deque([3, 'da', 3, 'd']), deque([1, 'cb', 1, 'c']), deque([3, 'db', 1, 'c']), deque([1, 'cb', 3, 'd']), deque([3, 'db', 3, 'd'])])
-    >>> expand_rule([[2, 2]], 2, [["a", 1, "b"], ["c", 3, "d"], ["e", 4, "f"]])
-    deque([deque(['a', 1, 'ba', 1, 'b']), deque(['c', 3, 'da', 1, 'b']), deque(['e', 4, 'fa', 1, 'b']), deque(['a', 1, 'bc', 3, 'd']), deque(['c', 3, 'dc', 3, 'd']), deque(['e', 4, 'fc', 3, 'd']), deque(['a', 1, 'be', 4, 'f']), deque(['c', 3, 'de', 4, 'f']), deque(['e', 4, 'fe', 4, 'f'])])
-    """
-    new_rule_set = collections.deque()
-    for rule in rule_set:
-        new_rules = collections.deque()
-        new_rules.append(collections.deque())
-        for token in rule:
-            if token != replace_id:
-                for sub_rule in new_rules:
-                    sub_rule.append(token)
-                continue
-            temp_new_rules = collections.deque()
-            for replace_rule in replace_rule_set:
-                for sub_rule in new_rules:
-                    sub_rule = collections.deque(sub_rule)
-                    sub_rule.extend(replace_rule)
-                    temp_new_rules.append(sub_rule)
-            new_rules = temp_new_rules
-        new_rule_set.extend(new_rules)
+            indices_to_remove = []
+            for nested_index, nested_token in enumerate(nested_rule):
+                for new_rule_index in range(new_rule_length):
+                    index = nested_index * new_rule_length + new_rule_index
 
-    return normalize(new_rule_set)
+                    new_rule[index] += nested_token
+                    is_in_messages = any((new_rule[index] in message for message in messages))
+                    if not is_in_messages:
+                        indices_to_remove.append(index)
 
-def rules_to_expand(rule_set):
-    """
-    >>> rules_to_expand([[1, 2, 2], ["a", 3, 2]])
-    {1, 2, 3}
-    """
-    to_expand = set()
-    for rule in rule_set:
-        for token in rule:
-            if isinstance(token, str):
-                continue
-            to_expand.add(token)
-    return to_expand
+            for index in sorted(indices_to_remove, reverse=True):
+                del new_rule[index]
+        expanded_rule_set.update(new_rule)
+
+    return expanded_rule_set
 
 
 if __name__ == "__main__":
@@ -143,34 +132,11 @@ if __name__ == "__main__":
     lines = ioaoc.read_file("day19_input.txt")
 
     raw_rules, messages = parse(lines)
-    to_check = sorted(list(raw_rules.keys()))
+    ordered_rules = order(raw_rules)
 
-    i = 0
+    expanded_rules = {}
+    for rule_id, rule_set in order(raw_rules).items():
+        expanded_rules[rule_id] = expand(rule_set, expanded_rules, messages)
 
-    while to_check:
-        for rule_id, rule_set in sorted(raw_rules.items()):
-            print("   ", rule_id, len(rule_set))
+    print(">", len(set(expanded_rules[0]).intersection(set(messages))))
 
-        print("iteration", i, len(to_check))
-
-        i += 1
-
-        for rule_id in to_check:
-            print("checking", rule_id)
-            rule_set = raw_rules[rule_id]
-            if is_expanded(rule_set):
-                to_check.remove(rule_id)
-                continue
-
-            for ri in rules_to_expand(rule_set):
-                print(" expanding", ri)
-                rule_set = expand_rule(rule_set, ri, raw_rules[ri])
-            raw_rules[rule_id] = rule_set
-
-    valid_messages = []
-
-    for rule in raw_rules[0]:
-        [rule] = rule
-        valid_messages.append(rule)
-    
-    print(">", len(set(valid_messages).intersection(set(messages))))
