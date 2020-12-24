@@ -103,17 +103,17 @@ def is_recursive(rule_id, rule_set):
     return False
 
 
-def expand_recursive(rule_set, expanded_rules, messages):
+def expand(rule_set, expanded_rules, messages):
     """
-    >>> list(sorted(expand_recursive(["a", ["a", 1], [1, "a"]], {1: {"abb", "bbc"}}, {"aabbabbc", "abbabbca"})))
+    >>> list(sorted(expand(["a", ["a", 1], [1, "a"]], {1: {"abb", "bbc"}}, {"aabbabbc", "abbabbca"})))
     ['a', 'aabb', 'abba', 'abbc', 'bbca']
-    >>> list(sorted(expand_recursive(["a", ["a", 1], [1, "a"], [1, 1]], {1: {"abb", "bbc"}}, {"aabbabbcabbabbbbc", "bbcaaacc"})))
+    >>> list(sorted(expand(["a", ["a", 1], [1, "a"], [1, 1]], {1: {"abb", "bbc"}}, {"aabbabbcabbabbbbc", "bbcaaacc"})))
     ['a', 'aabb', 'abba', 'abbabb', 'abbbbc', 'abbc', 'bbca', 'bbcabb']
-    >>> list(sorted(expand_recursive([[2, 3], [3, 2]], {2: {"aa", "bb"}, 3: {"ab", "ba"}}, {'ababbb', 'bababa', 'abbbab', 'aaabbb', 'aaaabbb'})))
+    >>> list(sorted(expand([[2, 3], [3, 2]], {2: {"aa", "bb"}, 3: {"ab", "ba"}}, {'ababbb', 'bababa', 'abbbab', 'aaabbb', 'aaaabbb'})))
     ['aaab', 'abbb', 'babb', 'bbab', 'bbba']
-    >>> sorted([str(x) for x in expand_recursive([[1], [1, 1], [1, 2]], {1: ["a", "b"]}, ["aab"])])
+    >>> sorted([str(x) for x in expand([[1], [1, 1], [1, 2]], {1: ["a", "b"]}, ["aab"])])
     ["('a', 2)", "('b', 2)", 'a', 'aa', 'ab', 'b']
-    >>> sorted([str(x) for x in expand_recursive([[1, 3], [1, 2, 3]], {1: ["a", "b"], 3: ["a", "b"]}, ["aab"])])
+    >>> sorted([str(x) for x in expand([[1, 3], [1, 2, 3]], {1: ["a", "b"], 3: ["a", "b"]}, ["aab"])])
     ["('a', 2, 'a')", "('a', 2, 'b')", "('b', 2, 'a')", "('b', 2, 'b')", 'aa', 'ab']
     """
 
@@ -133,7 +133,7 @@ def expand_recursive(rule_set, expanded_rules, messages):
                 for index in range(new_rules_length):
                     new_rules.append(list(new_rules[index]))
 
-            indices_to_remove = []
+            indices_to_remove = set()
             for nested_index, nested_token in enumerate(nested_rule):
                 for new_rule_index in range(new_rules_length):
                     index = nested_index * new_rules_length + new_rule_index
@@ -141,7 +141,7 @@ def expand_recursive(rule_set, expanded_rules, messages):
                         new_rules[index][-1] += nested_token
                         is_in_messages = any((new_rules[index][-1] in message for message in messages))
                         if not is_in_messages:
-                            indices_to_remove.append(index)
+                            indices_to_remove.add(index)
                     else:
                         new_rules[index].append(nested_token)
 
@@ -156,6 +156,97 @@ def expand_recursive(rule_set, expanded_rules, messages):
 
     return expanded_rule_set
 
+def expand_recursive(rule_id, rule_set, messages):
+    """
+    >>> list(sorted(expand_recursive(2, [("a", 2, "a"), ("a", 2, "b"), ("b", 2, "a"), ("b", 2, "b"), "aa", "ab"], ["aaaabbb", "baba"])))
+    ['aa', 'aaaa', 'aaaabb', 'aaab', 'aaabbb', 'aabb', 'ab', 'baba']
+    """
+    tuple_rule_set = []
+    for rule in rule_set:
+        if isinstance(rule, str):
+            rule = (rule, )
+        tuple_rule_set.append(rule)
+
+    expanded_rule_set = set()
+    rules_to_expand = collections.deque(tuple_rule_set)
+
+    max_length = max([len(message) for message in messages])
+
+    i = 0
+    while rules_to_expand:
+        i += 1
+        rule = rules_to_expand.popleft()
+
+        if i % 100 == 0:
+            print(i, "rules", len(rules_to_expand))
+
+        new_rules = [[]]
+
+        for token in rule:
+            indices_to_remove = set()
+            if isinstance(token, str):
+                for index, new_rule in enumerate(new_rules):
+                    if new_rule and isinstance(new_rule[-1], str):
+                        new_rule[-1] += token
+                        is_in_messages = any((message.startswith(new_rule[-1]) or message.endswith(new_rule[-1]) for message in messages))
+                        if not is_in_messages:
+                            indices_to_remove.add(index)
+                    else:
+                        new_rule.append(token)
+            elif token == rule_id:
+                recursive_rule = tuple_rule_set
+                new_rules_length = len(new_rules)
+                recursive_rule_length = len(recursive_rule)
+
+                for _ in range(recursive_rule_length - 1):
+                    for index in range(new_rules_length):
+                        new_rules.append(list(new_rules[index]))
+
+                for nested_index, nested_tokens in enumerate(recursive_rule):
+                    for nested_token in nested_tokens:
+                        for new_rule_index in range(new_rules_length):
+                            index = nested_index * new_rules_length + new_rule_index
+                            new_rule = new_rules[index]
+
+                            if isinstance(nested_token, str):
+                                if new_rule and isinstance(new_rule[-1], str):
+                                    new_rule[-1] += nested_token
+                                    is_in_messages = any((message.startswith(new_rule[-1]) or message.endswith(new_rule[-1]) for message in messages))
+                                    if not is_in_messages:
+                                        indices_to_remove.add(index)
+                                else:
+                                    new_rule.append(nested_token)
+                            else:
+                                new_rule.append(nested_token)
+            else:
+                raise ValueError(f"unexpected token {token}")
+
+            for index in sorted(indices_to_remove, reverse=True):
+                del new_rules[index]
+
+        x = 0
+        for rule in new_rules:
+            if len(rule) == 1:
+                [rule] = rule
+                expanded_rule_set.add(rule)
+            else:
+                length = 0
+                for token in rule:
+                    if token == rule_id:
+                        length += 1
+                    else:
+                        length += len(token)
+
+                if length >= max_length:
+                    x += 1
+                    continue
+
+                rules_to_expand.append(rule)
+        if x:
+            print(" removed", x)
+
+    return expanded_rule_set
+
 
 if __name__ == "__main__":
     lines = test_input.split("\n")
@@ -164,22 +255,24 @@ if __name__ == "__main__":
     raw_rules, messages = parse(lines)
     ordered_rules = order(raw_rules)
 
-    expanded_rules = {}
-    for rule_id, rule_set in order(raw_rules).items():
-        expanded_rules[rule_id] = expand_recursive(rule_set, expanded_rules, messages)
-
-    print(">", len(set(expanded_rules[0]).intersection(set(messages))))
-
-    # raw_rules[8] = [[42], [42, 8]]
-    # raw_rules[11] = [[42, 31], [42, 11, 31]]
-    # ordered_rules = order(raw_rules)
-
     # expanded_rules = {}
     # for rule_id, rule_set in order(raw_rules).items():
-    #     if is_recursive(rule_id, rule_set):
-    #         expanded_rule_set = expand_recursive(rule_id, rule_set, expanded_rules, messages)
-    #     else:
-    #         expanded_rule_set = expand(rule_set, expanded_rules, messages)
-    #     expanded_rules[rule_id] = expanded_rule_set
+    #     expanded_rules[rule_id] = expand(rule_set, expanded_rules, messages)
 
-    # print(">>", len(set(expanded_rules[0]).intersection(set(messages))))
+    # print(">", len(set(expanded_rules[0]).intersection(set(messages))))
+
+    raw_rules[8] = [[42], [42, 8]]
+    raw_rules[11] = [[42, 31], [42, 11, 31]]
+    ordered_rules = order(raw_rules)
+
+    expanded_rules = {}
+    for rule_id, rule_set in order(raw_rules).items():
+        print("expanding", rule_id)
+        expanded_rule = expand(rule_set, expanded_rules, messages)
+        if not all((isinstance(valid, str) for valid in expanded_rule)):
+            print("expanding recursive")
+            expanded_rules[rule_id] = expand_recursive(rule_id, expanded_rule, messages)
+        expanded_rules[rule_id] = expanded_rule
+        print(" ", len(expanded_rule))
+
+    print(">>", len(set(expanded_rules[0]).intersection(set(messages))))
