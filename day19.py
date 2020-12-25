@@ -88,21 +88,6 @@ def order(rule_set):
     return ordered_rule_set
 
 
-def is_recursive(rule_id, rule_set):
-    """
-    >>> is_recursive(2, ["abc", [1, 3]])
-    False
-    >>> is_recursive(2, ["abc", [1, 2, 3]])
-    True
-    """
-    for rule in rule_set:
-        if isinstance(rule, str):
-            continue
-        if rule_id in rule:
-            return True
-    return False
-
-
 def expand(rule_set, expanded_rules, messages):
     """
     >>> list(sorted(expand(["a", ["a", 1], [1, "a"]], {1: {"abb", "bbc"}}, {"aabbabbc", "abbabbca"})))
@@ -156,6 +141,7 @@ def expand(rule_set, expanded_rules, messages):
 
     return expanded_rule_set
 
+
 def expand_recursive(rule_id, rule_set, messages):
     """
     >>> list(sorted(expand_recursive(2, [("a", 2, "a"), ("a", 2, "b"), ("b", 2, "a"), ("b", 2, "b"), "aa", "ab"], ["aaaabbb", "baba"])))
@@ -170,15 +156,8 @@ def expand_recursive(rule_id, rule_set, messages):
     expanded_rule_set = set()
     rules_to_expand = collections.deque(tuple_rule_set)
 
-    max_length = max([len(message) for message in messages])
-
-    i = 0
     while rules_to_expand:
-        i += 1
         rule = rules_to_expand.popleft()
-
-        if i % 100 == 0:
-            print(i, "rules", len(rules_to_expand))
 
         new_rules = [[]]
 
@@ -224,7 +203,6 @@ def expand_recursive(rule_id, rule_set, messages):
             for index in sorted(indices_to_remove, reverse=True):
                 del new_rules[index]
 
-        x = 0
         for rule in new_rules:
             if len(rule) == 1:
                 [rule] = rule
@@ -237,15 +215,20 @@ def expand_recursive(rule_id, rule_set, messages):
                     else:
                         length += len(token)
 
-                if length >= max_length:
-                    x += 1
-                    continue
-
                 rules_to_expand.append(rule)
-        if x:
-            print(" removed", x)
 
     return expanded_rule_set
+
+
+def expand_regexp(rule_set, expanded_rules):
+    parts = []
+    for rule in rule_set:
+        part = ""
+        for rule_token in rule:
+            part += expanded_rules.get(rule_token, rule_token)
+        parts.append(part)
+
+    return f'(?:{"|".join(parts)})'
 
 
 if __name__ == "__main__":
@@ -255,24 +238,35 @@ if __name__ == "__main__":
     raw_rules, messages = parse(lines)
     ordered_rules = order(raw_rules)
 
-    # expanded_rules = {}
-    # for rule_id, rule_set in order(raw_rules).items():
-    #     expanded_rules[rule_id] = expand(rule_set, expanded_rules, messages)
-
-    # print(">", len(set(expanded_rules[0]).intersection(set(messages))))
-
-    raw_rules[8] = [[42], [42, 8]]
-    raw_rules[11] = [[42, 31], [42, 11, 31]]
-    ordered_rules = order(raw_rules)
+    expanded_rules = {}
+    for rule_id, rule_set in order(raw_rules).items():
+        expanded_rule = expand_regexp(rule_set, expanded_rules)
+        expanded_rules[rule_id] = expanded_rule
+    
+    compiled_regexp = re.compile(f"^{expanded_rules[0]}$")
+    matched = 0
+    for message in messages:
+        if compiled_regexp.match(message):
+            matched += 1
+    
+    print(">", matched)
 
     expanded_rules = {}
     for rule_id, rule_set in order(raw_rules).items():
-        print("expanding", rule_id)
-        expanded_rule = expand(rule_set, expanded_rules, messages)
-        if not all((isinstance(valid, str) for valid in expanded_rule)):
-            print("expanding recursive")
-            expanded_rules[rule_id] = expand_recursive(rule_id, expanded_rule, messages)
+        expanded_rule = expand_regexp(rule_set, expanded_rules)
+        if rule_id == 8:
+            expanded_rule = f"(?:{expanded_rules[42]}+)"
+        elif rule_id == 11:
+            r31 = expanded_rules[31]
+            r42 = expanded_rules[42]
+            expanded_rule = f"(?:{r42}{r31}|{r42}[2]{r31}[2]|{r42}[3]{r31}[3]|{r42}[4]{r31}[4]|{r42}[5]{r31}[5]|{r42}[6]{r31}[6]|{r42}[7]{r31}[7])"
+            expanded_rule = f"(?:{r42}{r31}|{r42}{{2}}{r31}{{2}}|{r42}{{3}}{r31}{{3}}|{r42}{{4}}{r31}{{4}})"
         expanded_rules[rule_id] = expanded_rule
-        print(" ", len(expanded_rule))
-
-    print(">>", len(set(expanded_rules[0]).intersection(set(messages))))
+    
+    compiled_regexp = re.compile(f"^{expanded_rules[0]}$")
+    matched = 0
+    for message in messages:
+        if compiled_regexp.match(message):
+            matched += 1
+    
+    print(">>", matched)
